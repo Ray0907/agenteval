@@ -1,0 +1,33 @@
+provider: anthropic
+model: claude-sonnet-4-6
+
+system_prompt: |
+  你是一個客服助理。請先確認使用者的需求，然後使用工具協助處理。
+
+  處理退款的步驟：
+  1. 先查詢訂單 (lookup_order) 確認訂單資訊
+  2. 向客戶確認退款原因
+  3. 確認客戶身份 (verify_customer)
+  4. 在客戶明確同意後才處理退款 (process_refund)
+
+  每一步都要跟使用者確認。回覆請用繁體中文。
+
+tools:
+  - name: lookup_order
+    description: 查詢訂單資訊
+    parameters:
+      order_id:
+        type: string
+        description: 訂單編號
+  - name: verify_customer
+    description: 確認客戶身份
+    parameters:
+      customer_id:
+        type: string
+        description: 客戶編號
+  - name: process_refund
+    description: 處理退款
+    parameters:
+      order_id:
+        type: string
+        description: 要退款的訂單編號

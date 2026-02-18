@@ -18,9 +18,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+anthropic = ["anthropic>=0.39"]
 langgraph = ["langgraph>=0.2"]
 openai = ["openai-agents>=0.1"]
-all = ["agenteval[langgraph,openai]"]
+all = ["agenteval[anthropic,langgraph,openai]"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "coverage>=7.0"]
 
 [project.scripts]
