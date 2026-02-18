@@ -1,0 +1,55 @@
+name: refund_request
+description: Customer requests a refund for a delivered order
+initial_state:
+  orders:
+    - id: "o1"
+      status: delivered
+      amount: 49.99
+      customer_id: "c1"
+  customers:
+    - id: "c1"
+      name: Alice
+      email: alice@example.com
+conversation_script:
+  - "Hi, I'd like a refund for order o1"
+  - "Yes, the item was damaged when it arrived"
+  - "Yes please, process the refund"
+checkpoints:
+  - id: lookup_order
+    require:
+      tool_called: lookup_order
+      tool_args:
+        order_id: "o1"
+  - id: verify_customer
+    depends_on:
+      - lookup_order
+    require:
+      tool_called: verify_customer
+  - id: process_refund
+    depends_on:
+      - verify_customer
+    require:
+      tool_called: process_refund
+      tool_args:
+        order_id: "o1"
+success: process_refund
+expected_final_state:
+  orders:
+    - id: "o1"
+      status: refunded
+      amount: 49.99
+      customer_id: "c1"
+tags:
+  - refund
+  - customer-service
+expected_tools:
+  required:
+    - lookup_order
+    - verify_customer
+    - process_refund
+  forbidden:
+    - delete_account
+    - modify_payment
+constraints:
+  max_turns: 5
+  max_cost: 0.10

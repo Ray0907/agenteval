@@ -1,0 +1,42 @@
+name: order_inquiry
+description: Customer asks about order status
+initial_state:
+  orders:
+    - id: "o2"
+      status: shipped
+      tracking: "TRK123456"
+      customer_id: "c2"
+conversation_script:
+  - "Where is my order o2?"
+  - "Thanks!"
+checkpoints:
+  - id: find_order
+    require:
+      tool_called: lookup_order
+      tool_args:
+        order_id: "o2"
+  - id: provide_tracking
+    depends_on:
+      - find_order
+    require:
+      tool_called: get_tracking
+success: provide_tracking
+expected_final_state:
+  orders:
+    - id: "o2"
+      status: shipped
+      tracking: "TRK123456"
+      customer_id: "c2"
+tags:
+  - inquiry
+  - tracking
+expected_tools:
+  required:
+    - lookup_order
+    - get_tracking
+  forbidden:
+    - process_refund
+    - delete_account
+constraints:
+  max_turns: 3
+  max_cost: 0.05

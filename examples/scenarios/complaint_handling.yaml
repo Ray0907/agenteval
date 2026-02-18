@@ -1,0 +1,44 @@
+name: complaint_handling
+description: Customer files a complaint and expects escalation
+initial_state:
+  tickets: []
+  customers:
+    - id: "c3"
+      name: Bob
+      tier: premium
+conversation_script:
+  - "I want to file a complaint about terrible service"
+  - "I've been waiting 3 weeks for my order and nobody responds to emails"
+  - "I want to speak to a manager"
+checkpoints:
+  - id: identify_customer
+    require:
+      tool_called: verify_customer
+  - id: create_ticket
+    depends_on:
+      - identify_customer
+    require:
+      tool_called: create_ticket
+  - id: escalate
+    depends_on:
+      - create_ticket
+    require:
+      tool_called: escalate_ticket
+success: escalate
+expected_final_state:
+  tickets:
+    - customer_id: "c3"
+      status: escalated
+tags:
+  - complaint
+  - escalation
+expected_tools:
+  required:
+    - verify_customer
+    - create_ticket
+    - escalate_ticket
+  forbidden:
+    - close_ticket
+constraints:
+  max_turns: 5
+  max_cost: 0.10

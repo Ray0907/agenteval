@@ -1,0 +1,7 @@
+project: customer_service_agent
+agent: agents.customer_service:CustomerServiceAdapter
+scenarios: scenarios/
+k: 5
+thresholds:
+  min_pass_k: 0.8
+  min_tool_accuracy: 0.9
