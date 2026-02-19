@@ -17,13 +17,20 @@ def _build_tool_schema(tool_def: dict) -> dict:
     """Convert simplified tool definition to JSON Schema."""
     properties = {}
     required = []
-    for pname, pdef in tool_def.get("parameters", {}).items():
-        if isinstance(pdef, dict):
-            properties[pname] = {k: v for k, v in pdef.items()}
+    for param_name, param_def in tool_def.get("parameters", {}).items():
+        if isinstance(param_def, dict):
+            properties[param_name] = dict(param_def)
         else:
-            properties[pname] = {"type": pdef}
-        required.append(pname)
+            properties[param_name] = {"type": param_def}
+        required.append(param_name)
     return {"type": "object", "properties": properties, "required": required}
+
+
+def _serialize_tool_result(result: Any) -> str:
+    """Serialize a tool result to a string for inclusion in message history."""
+    if isinstance(result, str):
+        return result
+    return json.dumps(result)
 
 
 class LLMAdapter(AgentAdapter):
@@ -92,7 +99,7 @@ class LLMAdapter(AgentAdapter):
         self._history.append({"role": "user", "content": message})
         if self.provider == "anthropic":
             return await self._send_anthropic()
-        elif self.provider == "openai":
+        if self.provider == "openai":
             return await self._send_openai()
         raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -139,7 +146,7 @@ class LLMAdapter(AgentAdapter):
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tu.id,
-                        "content": json.dumps(result) if not isinstance(result, str) else result,
+                        "content": _serialize_tool_result(result),
                     })
                 self._history.append({"role": "user", "content": tool_results})
                 continue
@@ -205,7 +212,7 @@ class LLMAdapter(AgentAdapter):
                     tool_msg = {
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": json.dumps(result) if not isinstance(result, str) else result,
+                        "content": _serialize_tool_result(result),
                     }
                     messages.append(tool_msg)
                     self._history.append(tool_msg)

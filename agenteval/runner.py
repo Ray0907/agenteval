@@ -1,82 +1,145 @@
 """Async execution engine."""
 from __future__ import annotations
-import copy, uuid
+
+import copy
+import uuid
+from typing import Any
+
 from agenteval.adapters.base import AgentAdapter, SessionContext
 from agenteval.evaluators.dag import DagProgressEvaluator
 from agenteval.evaluators.efficiency import EfficiencyEvaluator
 from agenteval.evaluators.state import StateEvaluator, compare_state
 from agenteval.evaluators.tool_accuracy import ToolAccuracyEvaluator
-from agenteval.models import EvalResult, Run, Scenario, Turn
+from agenteval.models import Checkpoint, EvalResult, Run, Scenario, Turn
 
 
-def _check_cp(cp, tool_names, tool_args_map):
-    req = cp.require
-    if "tool_called" in req and req["tool_called"] not in tool_names:
+def _checkpoint_satisfied(
+    checkpoint: Checkpoint,
+    tool_names: list[str],
+    tool_args_by_name: dict[str, dict[str, Any]],
+) -> bool:
+    """Check whether a checkpoint's requirements are met by the current turn's tool calls."""
+    require = checkpoint.require
+    if "tool_called" in require and require["tool_called"] not in tool_names:
         return False
-    if "tool_args" in req:
-        args = tool_args_map.get(req.get("tool_called", ""), {})
-        if any(args.get(k) != v for k, v in req["tool_args"].items()):
+    if "tool_args" in require:
+        args = tool_args_by_name.get(require.get("tool_called", ""), {})
+        if any(args.get(k) != v for k, v in require["tool_args"].items()):
             return False
     return True
 
 
-def _reachable(scenario, reached, tool_names, tool_args_map):
-    new = []
+def _newly_reachable(
+    scenario: Scenario,
+    reached: set[str],
+    tool_names: list[str],
+    tool_args_by_name: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Return checkpoint IDs that are newly reachable after this turn."""
+    newly_reached = []
     for cp in scenario.checkpoints:
         if cp.id in reached:
             continue
-        if not all(d in reached for d in cp.depends_on):
+        if not all(dep in reached for dep in cp.depends_on):
             continue
-        if _check_cp(cp, tool_names, tool_args_map):
-            new.append(cp.id)
-    return new
+        if _checkpoint_satisfied(cp, tool_names, tool_args_by_name):
+            newly_reached.append(cp.id)
+    return newly_reached
 
 
-async def execute_run(adapter, scenario, run_id=None):
+async def execute_run(
+    adapter: AgentAdapter,
+    scenario: Scenario,
+    run_id: str | None = None,
+) -> Run:
+    """Execute a single run of a scenario against an adapter."""
     run_id = run_id or str(uuid.uuid4())[:8]
     state = copy.deepcopy(scenario.initial_state)
-    history, reached = [], set()
-    ttok, tcost, tlat = 0, 0.0, 0.0
+    turns: list[Turn] = []
+    reached: set[str] = set()
+    total_tokens = 0
+    total_cost = 0.0
+    total_latency_ms = 0.0
 
-    for i, msg in enumerate(scenario.conversation_script):
-        ctx = SessionContext(session_id=run_id, turn_number=i,
-                            initial_state=scenario.initial_state, current_state=state, history=history)
-        resp = await adapter.send_message(msg, ctx)
-        if resp.state_changes:
-            state.update(resp.state_changes)
-        tnames = [tc.name for tc in resp.tool_calls]
-        targs = {tc.name: tc.arguments for tc in resp.tool_calls}
-        new_cps = _reachable(scenario, reached, tnames, targs)
-        reached.update(new_cps)
-        for tc in resp.tool_calls:
-            tlat += tc.latency_ms
-        ttok += resp.metadata.get("tokens", 0)
-        tcost += resp.metadata.get("cost", 0.0)
-        history.append(Turn(turn_id=i, user_message=msg, agent_response=resp,
-                            elapsed_checkpoints=list(new_cps), cumulative_state=copy.deepcopy(state)))
+    for i, message in enumerate(scenario.conversation_script):
+        ctx = SessionContext(
+            session_id=run_id,
+            turn_number=i,
+            initial_state=scenario.initial_state,
+            current_state=state,
+            history=turns,
+        )
+        response = await adapter.send_message(message, ctx)
+
+        if response.state_changes:
+            state.update(response.state_changes)
+
+        tool_names = [tc.name for tc in response.tool_calls]
+        tool_args_by_name = {tc.name: tc.arguments for tc in response.tool_calls}
+        new_checkpoints = _newly_reachable(scenario, reached, tool_names, tool_args_by_name)
+        reached.update(new_checkpoints)
+
+        total_latency_ms += sum(tc.latency_ms for tc in response.tool_calls)
+        total_tokens += response.metadata.get("tokens", 0)
+        total_cost += response.metadata.get("cost", 0.0)
+
+        turns.append(Turn(
+            turn_id=i,
+            user_message=message,
+            agent_response=response,
+            elapsed_checkpoints=list(new_checkpoints),
+            cumulative_state=copy.deepcopy(state),
+        ))
+
         if scenario.success in reached:
             break
 
-    return Run(run_id=run_id, scenario=scenario.name, turns=history, final_state=state,
-               checkpoints_reached=list(reached), success=scenario.success in reached,
-               total_tokens=ttok, total_cost=tcost, total_latency_ms=tlat)
+    return Run(
+        run_id=run_id,
+        scenario=scenario.name,
+        turns=turns,
+        final_state=state,
+        checkpoints_reached=list(reached),
+        success=scenario.success in reached,
+        total_tokens=total_tokens,
+        total_cost=total_cost,
+        total_latency_ms=total_latency_ms,
+    )
 
 
-async def run_scenarios(adapter, scenario, k=3, project="default"):
-    runs = []
+async def run_scenarios(
+    adapter: AgentAdapter,
+    scenario: Scenario,
+    k: int = 3,
+    project: str = "default",
+) -> EvalResult:
+    """Run a scenario k times and aggregate evaluation results."""
+    runs: list[Run] = []
     for i in range(k):
         await adapter.reset()
         runs.append(await execute_run(adapter, scenario, run_id=f"{scenario.name}-{i}"))
 
-    ss = StateEvaluator().evaluate(runs, scenario)
-    ds = DagProgressEvaluator().evaluate(runs, scenario)
-    tr = ToolAccuracyEvaluator().evaluate(runs, scenario)
-    er = EfficiencyEvaluator().evaluate(runs, scenario)
-    ok = sum(1 for r in runs if r.success and compare_state(scenario.expected_final_state, r.final_state).match)
+    state_score = StateEvaluator().evaluate(runs, scenario)
+    dag_score = DagProgressEvaluator().evaluate(runs, scenario)
+    tool_result = ToolAccuracyEvaluator().evaluate(runs, scenario)
+    efficiency = EfficiencyEvaluator().evaluate(runs, scenario)
+    pass_count = sum(
+        1 for r in runs
+        if r.success and compare_state(scenario.expected_final_state, r.final_state).match
+    )
 
     return EvalResult(
-        project=project, scenario=scenario.name, k=k, runs=runs,
-        pass_k=ok / k if k else 0.0, state_correctness=ss, checkpoint_completion=ds,
-        tool_accuracy=tr["required_tools_score"], forbidden_tool_violations=tr["forbidden_violations"],
-        avg_turns=er["avg_turns"], avg_tokens=er["avg_tokens"],
-        avg_cost=er["avg_cost"], avg_latency_ms=er["avg_latency_ms"])
+        project=project,
+        scenario=scenario.name,
+        k=k,
+        runs=runs,
+        pass_k=pass_count / k if k else 0.0,
+        state_correctness=state_score,
+        checkpoint_completion=dag_score,
+        tool_accuracy=tool_result["required_tools_score"],
+        forbidden_tool_violations=tool_result["forbidden_violations"],
+        avg_turns=efficiency["avg_turns"],
+        avg_tokens=efficiency["avg_tokens"],
+        avg_cost=efficiency["avg_cost"],
+        avg_latency_ms=efficiency["avg_latency_ms"],
+    )

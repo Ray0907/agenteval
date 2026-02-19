@@ -1,8 +1,10 @@
 """State comparison evaluator."""
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
 from agenteval.evaluators.base import BaseEvaluator
 from agenteval.models import Run, Scenario
 

@@ -1,16 +1,19 @@
 """DAG progress evaluator."""
 from __future__ import annotations
+
 from agenteval.evaluators.base import BaseEvaluator
 from agenteval.models import Run, Scenario
 
 
 def get_blocking_info(scenario: Scenario, reached: list[str]) -> dict[str, list[str]]:
+    """Determine which unreached checkpoints are blocked vs. unblocked."""
     reached_set = set(reached)
-    blocked, unblocked = [], []
+    blocked: list[str] = []
+    unblocked: list[str] = []
     for cp in scenario.checkpoints:
         if cp.id in reached_set:
             continue
-        if any(d not in reached_set for d in cp.depends_on):
+        if any(dep not in reached_set for dep in cp.depends_on):
             blocked.append(cp.id)
         else:
             unblocked.append(cp.id)
