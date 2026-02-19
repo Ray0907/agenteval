@@ -15,12 +15,12 @@ LLM agents are non-deterministic. A single test run doesn't tell you if your age
 ## Install
 
 ```bash
-pip install -e .
+uv pip install -e .
 
 # With LLM provider support
-pip install -e ".[anthropic]"   # Anthropic Claude
-pip install -e ".[openai]"     # OpenAI
-pip install -e ".[all]"        # All providers
+uv pip install -e ".[anthropic]"   # Anthropic Claude
+uv pip install -e ".[openai]"     # OpenAI
+uv pip install -e ".[all]"        # All providers
 ```
 
 Requires Python 3.11+.
@@ -221,7 +221,7 @@ from agenteval.integrations.openai_agents import OpenAIAgentAdapter
 adapter = OpenAIAgentAdapter(agent=my_agent)
 ```
 
-Install extras: `pip install -e ".[langgraph]"` or `pip install -e ".[openai]"`
+Install extras: `uv pip install -e ".[langgraph]"` or `uv pip install -e ".[openai]"`
 
 ## Reports
 
